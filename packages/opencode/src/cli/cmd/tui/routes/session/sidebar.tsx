@@ -1,5 +1,5 @@
 import { useSync } from "@tui/context/sync"
-import { createMemo, For, Show, Switch, Match } from "solid-js"
+import { createEffect, createMemo, For, Show, Switch, Match, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useTheme } from "../../context/theme"
 import { Locale } from "@/util/locale"
@@ -10,7 +10,9 @@ import { Installation } from "@/installation"
 import { useKeybind } from "../../context/keybind"
 import { useDirectory } from "../../context/directory"
 import { useKV } from "../../context/kv"
+import { useLocal } from "../../context/local"
 import { TodoItem } from "../../component/todo-item"
+import { loadOpenAIUsage, type OpenAIUsageView, isOpenAIProvider } from "../../util/openai-usage"
 
 export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const sync = useSync()
@@ -25,6 +27,53 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
     diff: true,
     todo: true,
     lsp: true,
+    usage: false,
+  })
+
+  type UsageState = {
+    status: "idle" | "loading" | "success" | "error" | "missing"
+    data?: OpenAIUsageView
+    error?: string
+  }
+
+  const [usage, setUsage] = createStore<UsageState>({ status: "idle" })
+
+  const usageLabel = createMemo(() => {
+    if (usage.status === "loading") return "Loading"
+    if (usage.status === "missing") return "Not connected"
+    if (usage.status === "error") return "Unavailable"
+    if (usage.status === "success") return `${usage.data?.usedPercent ?? 0}% used`
+    return "—"
+  })
+
+  const refreshUsage = () => {
+    setUsage("status", "loading")
+    loadOpenAIUsage().then((result) => {
+      if (result.status === "success") {
+        setUsage({ status: "success", data: result.data })
+        return
+      }
+      if (result.status === "missing") {
+        setUsage({ status: "missing" })
+        return
+      }
+      setUsage({ status: "error", error: result.error })
+    })
+  }
+
+  const local = useLocal()
+  const currentProvider = createMemo(() => local.model.current()?.providerID)
+  const showUsage = createMemo(() => isOpenAIProvider(currentProvider()))
+  const intervalMs = 5 * 60 * 1000
+
+  createEffect(() => {
+    if (!showUsage()) {
+      setUsage({ status: "idle" })
+      return
+    }
+    refreshUsage()
+    const interval = setInterval(refreshUsage, intervalMs)
+    onCleanup(() => clearInterval(interval))
   })
 
   // Sort MCP servers alphabetically for consistent display order
@@ -106,6 +155,47 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
               <text fg={theme.textMuted}>{context()?.percentage ?? 0}% used</text>
               <text fg={theme.textMuted}>{cost()} spent</text>
             </box>
+            <Show when={showUsage()}>
+              <box>
+                <box flexDirection="row" gap={1} onMouseDown={() => setExpanded("usage", !expanded.usage)}>
+                  <text fg={theme.text}>{expanded.usage ? "▼" : "▶"}</text>
+                  <text fg={theme.text}>
+                    <b>Usage</b>
+                    <Show when={!expanded.usage}>
+                      <span style={{ fg: theme.textMuted }}> ({usageLabel()})</span>
+                    </Show>
+                  </text>
+                </box>
+                <Show when={expanded.usage}>
+                  <Switch>
+                    <Match when={usage.status === "loading"}>
+                      <text fg={theme.textMuted}>Loading...</text>
+                    </Match>
+                    <Match when={usage.status === "missing"}>
+                      <text fg={theme.textMuted}>OpenAI not connected</text>
+                    </Match>
+                    <Match when={usage.status === "error"}>
+                      <text fg={theme.textMuted}>{usage.error ?? "Usage unavailable"}</text>
+                    </Match>
+                    <Match when={usage.status === "success"}>
+                      <box>
+                        <text fg={theme.textMuted}>Plan {usage.data?.plan ?? "unknown"}</text>
+                        <For each={usage.data?.windows ?? []}>
+                          {(window) => (
+                            <text fg={theme.textMuted}>
+                              {window.name} · {window.usedPercent}% used · Resets in {window.resetIn}
+                            </text>
+                          )}
+                        </For>
+                        <Show when={usage.data?.limitReached}>
+                          <text fg={theme.warning}>Rate limit reached</text>
+                        </Show>
+                      </box>
+                    </Match>
+                  </Switch>
+                </Show>
+              </box>
+            </Show>
             <Show when={mcpEntries().length > 0}>
               <box>
                 <box
