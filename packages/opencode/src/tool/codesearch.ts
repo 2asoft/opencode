@@ -82,7 +82,13 @@ export const CodeSearchTool = Tool.define("codesearch", {
         "content-type": "application/json",
       }
 
-      const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.CONTEXT}`, {
+      const url = new URL(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.CONTEXT}`)
+      const key = process.env["EXA_API_KEY"]
+      if (key) {
+        url.searchParams.set("exaApiKey", key)
+      }
+
+      const response = await fetch(url, {
         method: "POST",
         headers,
         body: JSON.stringify(codeRequest),
