@@ -3,6 +3,10 @@ import {
   parseJwtClaims,
   extractAccountIdFromClaims,
   extractAccountId,
+  requireAccountId,
+  extractAccountKeyFromClaims,
+  extractAccountKey,
+  requireAccountKey,
   type IdTokenClaims,
 } from "../../src/plugin/codex"
 
@@ -71,6 +75,48 @@ describe("plugin.codex", () => {
     })
   })
 
+  describe("extractAccountKeyFromClaims", () => {
+    test("extracts chatgpt_account_user_id from nested auth claims", () => {
+      const claims: IdTokenClaims = {
+        "https://api.openai.com/auth": {
+          chatgpt_account_user_id: "user-a__acc-1",
+          chatgpt_account_id: "acc-1",
+          chatgpt_user_id: "user-a",
+        },
+      }
+      expect(extractAccountKeyFromClaims(claims)).toBe("user-a__acc-1")
+    })
+
+    test("falls back to chatgpt_user_id + account id", () => {
+      const claims: IdTokenClaims = {
+        "https://api.openai.com/auth": {
+          chatgpt_account_id: "acc-1",
+          chatgpt_user_id: "user-a",
+        },
+      }
+      expect(extractAccountKeyFromClaims(claims)).toBe("user-a__acc-1")
+    })
+
+    test("falls back to sub + account id", () => {
+      const claims: IdTokenClaims = {
+        sub: "auth0|abc",
+        "https://api.openai.com/auth": {
+          chatgpt_account_id: "acc-1",
+        },
+      }
+      expect(extractAccountKeyFromClaims(claims)).toBe("auth0|abc__acc-1")
+    })
+
+    test("returns undefined when key cannot be built", () => {
+      const claims: IdTokenClaims = {
+        "https://api.openai.com/auth": {
+          chatgpt_user_id: "user-a",
+        },
+      }
+      expect(extractAccountKeyFromClaims(claims)).toBeUndefined()
+    })
+  })
+
   describe("extractAccountId", () => {
     test("extracts from id_token first", () => {
       const idToken = createTestJwt({ chatgpt_account_id: "from-id-token" })
@@ -118,6 +164,116 @@ describe("plugin.codex", () => {
           refresh_token: "rt",
         }),
       ).toBe("acc-123")
+    })
+  })
+
+  describe("extractAccountKey", () => {
+    test("extracts from id_token first", () => {
+      const idToken = createTestJwt({
+        "https://api.openai.com/auth": {
+          chatgpt_account_user_id: "user-id__acc-1",
+          chatgpt_account_id: "acc-1",
+          chatgpt_user_id: "user-id",
+        },
+      })
+      const accessToken = createTestJwt({
+        "https://api.openai.com/auth": {
+          chatgpt_account_user_id: "user-access__acc-1",
+          chatgpt_account_id: "acc-1",
+          chatgpt_user_id: "user-access",
+        },
+      })
+      expect(
+        extractAccountKey({
+          id_token: idToken,
+          access_token: accessToken,
+          refresh_token: "rt",
+        }),
+      ).toBe("user-id__acc-1")
+    })
+
+    test("falls back to access_token", () => {
+      const idToken = createTestJwt({ email: "test@example.com" })
+      const accessToken = createTestJwt({
+        "https://api.openai.com/auth": {
+          chatgpt_account_user_id: "user-access__acc-1",
+          chatgpt_account_id: "acc-1",
+          chatgpt_user_id: "user-access",
+        },
+      })
+      expect(
+        extractAccountKey({
+          id_token: idToken,
+          access_token: accessToken,
+          refresh_token: "rt",
+        }),
+      ).toBe("user-access__acc-1")
+    })
+
+    test("returns undefined when account key cannot be built", () => {
+      const token = createTestJwt({ email: "test@example.com" })
+      expect(
+        extractAccountKey({
+          id_token: token,
+          access_token: token,
+          refresh_token: "rt",
+        }),
+      ).toBeUndefined()
+    })
+  })
+
+  describe("requireAccountId", () => {
+    test("returns account id when available", () => {
+      const idToken = createTestJwt({ chatgpt_account_id: "acc-id-token" })
+      const accessToken = createTestJwt({ email: "test@example.com" })
+      expect(
+        requireAccountId({
+          id_token: idToken,
+          access_token: accessToken,
+          refresh_token: "rt",
+        }),
+      ).toBe("acc-id-token")
+    })
+
+    test("throws when account id is missing", () => {
+      const token = createTestJwt({ email: "test@example.com" })
+      expect(() =>
+        requireAccountId({
+          id_token: token,
+          access_token: token,
+          refresh_token: "rt",
+        }),
+      ).toThrow()
+    })
+  })
+
+  describe("requireAccountKey", () => {
+    test("returns account key when available", () => {
+      const idToken = createTestJwt({
+        "https://api.openai.com/auth": {
+          chatgpt_account_user_id: "user-a__acc-1",
+          chatgpt_account_id: "acc-1",
+          chatgpt_user_id: "user-a",
+        },
+      })
+      expect(
+        requireAccountKey({
+          id_token: idToken,
+          access_token: idToken,
+          refresh_token: "rt",
+        }),
+      ).toBe("user-a__acc-1")
+    })
+
+    test("throws when account key is missing", () => {
+      const token = createTestJwt({ email: "test@example.com" })
+      expect(() =>
+        requireAccountKey({
+          id_token: token,
+          access_token: token,
+          refresh_token: "rt",
+        }),
+      ).toThrow()
     })
   })
 })

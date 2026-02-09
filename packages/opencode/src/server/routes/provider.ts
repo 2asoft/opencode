@@ -6,6 +6,9 @@ import { Provider } from "../../provider/provider"
 import { ModelsDev } from "../../provider/models"
 import { ProviderAuth } from "../../provider/auth"
 import { ProviderID } from "../../provider/schema"
+import { loadProviderUsage, ProviderUsageResultSchema } from "../../provider/usage"
+import { Session } from "../../session"
+import { SessionID } from "../../session/schema"
 import { mapValues } from "remeda"
 import { errors } from "../error"
 import { lazy } from "../../util/lazy"
@@ -79,6 +82,52 @@ export const ProviderRoutes = lazy(() =>
       }),
       async (c) => {
         return c.json(await ProviderAuth.methods())
+      },
+    )
+    .get(
+      "/usage",
+      describeRoute({
+        summary: "Get provider usage",
+        description: "Get usage limits for the current in-use provider if it supports reporting usage.",
+        operationId: "provider.usage",
+        responses: {
+          200: {
+            description: "Provider usage status",
+            content: {
+              "application/json": {
+                schema: resolver(ProviderUsageResultSchema),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          sessionID: SessionID.zod.optional().meta({ description: "Session ID" }),
+        }),
+      ),
+      async (c) => {
+        const sessionID = c.req.valid("query").sessionID
+        const providerID = await (async () => {
+          if (sessionID) {
+            const [latest] = await Session.messages({
+              sessionID,
+              limit: 1,
+            }).catch(() => [])
+            if (latest?.info.role === "assistant") return latest.info.providerID
+            if (latest?.info.role === "user") return latest.info.model.providerID
+          }
+          const config = await Config.get()
+          if (!config.model) return undefined
+          return Provider.parseModel(config.model).providerID
+        })()
+        if (!providerID) {
+          return c.json({
+            status: "missing",
+          })
+        }
+        return c.json(await loadProviderUsage(providerID))
       },
     )
     .post(

@@ -49,10 +49,15 @@ function generateState(): string {
 
 export interface IdTokenClaims {
   chatgpt_account_id?: string
+  chatgpt_account_user_id?: string
+  sub?: string
   organizations?: Array<{ id: string }>
   email?: string
   "https://api.openai.com/auth"?: {
     chatgpt_account_id?: string
+    chatgpt_account_user_id?: string
+    chatgpt_user_id?: string
+    user_id?: string
   }
 }
 
@@ -74,6 +79,28 @@ export function extractAccountIdFromClaims(claims: IdTokenClaims): string | unde
   )
 }
 
+export function extractAccountKeyFromClaims(claims: IdTokenClaims): string | undefined {
+  const auth = claims["https://api.openai.com/auth"]
+  if (claims.chatgpt_account_user_id) {
+    return claims.chatgpt_account_user_id
+  }
+  if (auth?.chatgpt_account_user_id) {
+    return auth.chatgpt_account_user_id
+  }
+
+  const accountId = extractAccountIdFromClaims(claims)
+  if (!accountId) return undefined
+
+  const userId = auth?.chatgpt_user_id || auth?.user_id
+  if (userId) {
+    return `${userId}__${accountId}`
+  }
+  if (claims.sub) {
+    return `${claims.sub}__${accountId}`
+  }
+  return undefined
+}
+
 export function extractAccountId(tokens: TokenResponse): string | undefined {
   if (tokens.id_token) {
     const claims = parseJwtClaims(tokens.id_token)
@@ -85,6 +112,35 @@ export function extractAccountId(tokens: TokenResponse): string | undefined {
     return claims ? extractAccountIdFromClaims(claims) : undefined
   }
   return undefined
+}
+
+export function extractAccountKey(tokens: TokenResponse): string | undefined {
+  if (tokens.id_token) {
+    const claims = parseJwtClaims(tokens.id_token)
+    const accountKey = claims && extractAccountKeyFromClaims(claims)
+    if (accountKey) return accountKey
+  }
+  if (tokens.access_token) {
+    const claims = parseJwtClaims(tokens.access_token)
+    return claims ? extractAccountKeyFromClaims(claims) : undefined
+  }
+  return undefined
+}
+
+export function requireAccountId(tokens: TokenResponse): string {
+  const accountId = extractAccountId(tokens)
+  if (!accountId) {
+    throw new Error("OpenAI account ID missing in OAuth token claims.")
+  }
+  return accountId
+}
+
+export function requireAccountKey(tokens: TokenResponse): string {
+  const accountKey = extractAccountKey(tokens)
+  if (!accountKey) {
+    throw new Error("OpenAI account user key missing in OAuth token claims.")
+  }
+  return accountKey
 }
 
 function buildAuthorizeUrl(redirectUri: string, pkce: PkceCodes, state: string): string {
@@ -436,13 +492,17 @@ export async function CodexAuthPlugin(input: PluginInput): Promise<Hooks> {
             if (currentAuth.type !== "oauth") return fetch(requestInput, init)
 
             // Cast to include accountId field
-            const authWithAccount = currentAuth as typeof currentAuth & { accountId?: string }
+            const authWithAccount = currentAuth as typeof currentAuth & {
+              accountId?: string
+              accountKey?: string
+            }
 
             // Check if token needs refresh
             if (!currentAuth.access || currentAuth.expires < Date.now()) {
               log.info("refreshing codex access token")
               const tokens = await refreshAccessToken(currentAuth.refresh)
               const newAccountId = extractAccountId(tokens) || authWithAccount.accountId
+              const newAccountKey = extractAccountKey(tokens) || authWithAccount.accountKey
               await input.client.auth.set({
                 path: { id: "openai" },
                 body: {
@@ -451,10 +511,12 @@ export async function CodexAuthPlugin(input: PluginInput): Promise<Hooks> {
                   access: tokens.access_token,
                   expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
                   ...(newAccountId && { accountId: newAccountId }),
+                  ...(newAccountKey && { accountKey: newAccountKey }),
                 },
               })
               currentAuth.access = tokens.access_token
               authWithAccount.accountId = newAccountId
+              authWithAccount.accountKey = newAccountKey
             }
 
             // Build headers
@@ -517,13 +579,15 @@ export async function CodexAuthPlugin(input: PluginInput): Promise<Hooks> {
               callback: async () => {
                 const tokens = await callbackPromise
                 stopOAuthServer()
-                const accountId = extractAccountId(tokens)
+                const accountId = requireAccountId(tokens)
+                const accountKey = requireAccountKey(tokens)
                 return {
                   type: "success" as const,
                   refresh: tokens.refresh_token,
                   access: tokens.access_token,
                   expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
                   accountId,
+                  accountKey,
                 }
               },
             }
@@ -598,7 +662,8 @@ export async function CodexAuthPlugin(input: PluginInput): Promise<Hooks> {
                       refresh: tokens.refresh_token,
                       access: tokens.access_token,
                       expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-                      accountId: extractAccountId(tokens),
+                      accountId: requireAccountId(tokens),
+                      accountKey: requireAccountKey(tokens),
                     }
                   }
 

@@ -1520,6 +1520,7 @@ export type OAuth = {
   access: string
   expires: number
   accountId?: string
+  accountKey?: string
   enterpriseUrl?: string
 }
 
@@ -4004,6 +4005,48 @@ export type ProviderAuthResponses = {
 }
 
 export type ProviderAuthResponse = ProviderAuthResponses[keyof ProviderAuthResponses]
+
+export type ProviderUsageData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    /**
+     * Session ID
+     */
+    sessionID?: string
+  }
+  url: "/provider/usage"
+}
+
+export type ProviderUsageResponses = {
+  /**
+   * Provider usage status
+   */
+  200:
+    | {
+        status: "missing"
+      }
+    | {
+        status: "unsupported"
+      }
+    | {
+        status: "error"
+        error: string
+      }
+    | {
+        status: "success"
+        data: {
+          limits: Array<{
+            label?: string
+            usedPercent: number
+            resetAfterSeconds: number
+          }>
+        }
+      }
+}
+
+export type ProviderUsageResponse = ProviderUsageResponses[keyof ProviderUsageResponses]
 
 export type ProviderOauthAuthorizeData = {
   body?: {

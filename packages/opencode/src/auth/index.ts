@@ -17,6 +17,7 @@ export namespace Auth {
       access: z.string(),
       expires: z.number(),
       accountId: z.string().optional(),
+      accountKey: z.string().optional(),
       enterpriseUrl: z.string().optional(),
     })
     .meta({ ref: "OAuth" })
@@ -39,6 +40,13 @@ export namespace Auth {
   export const Info = z.discriminatedUnion("type", [Oauth, Api, WellKnown]).meta({ ref: "Auth" })
   export type Info = z.infer<typeof Info>
 
+  export const OpenAIOauth = Oauth.extend({
+    accountId: z.string(),
+    accountKey: z.string(),
+    updatedAt: z.number(),
+  }).meta({ ref: "OpenAIOAuth" })
+  export type OpenAIOauth = z.infer<typeof OpenAIOauth>
+
   export async function get(providerID: string) {
     return runPromise((service) => service.get(providerID))
   }
@@ -53,5 +61,9 @@ export namespace Auth {
 
   export async function remove(key: string) {
     return runPromise((service) => service.remove(key))
+  }
+
+  export async function rotateOpenAIFromQuota(tried = new Set<string>()) {
+    return runPromise((service) => service.rotateOpenAIFromQuota(tried))
   }
 }

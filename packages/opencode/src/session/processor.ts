@@ -46,6 +46,7 @@ export namespace SessionProcessor {
       async process(streamInput: LLM.StreamInput) {
         log.info("process")
         needsCompaction = false
+        const quotaTried = new Set<string>()
         const shouldBreak = (await Config.get()).experimental?.continue_loop_on_deny !== true
         while (true) {
           try {
@@ -364,7 +365,25 @@ export namespace SessionProcessor {
                 error,
               })
             } else {
-              const retry = SessionRetry.retryable(error)
+              const quota = await SessionRetry.handleQuota({
+                providerID: input.model.providerID,
+                error,
+                quotaTried,
+              })
+              if (quota === "rotated") {
+                attempt++
+                const delay = SessionRetry.delay(attempt, error.name === "APIError" ? error : undefined)
+                SessionStatus.set(input.sessionID, {
+                  type: "retry",
+                  attempt,
+                  message: "Switching OpenAI account due to quota exhaustion",
+                  next: Date.now() + delay,
+                })
+                await SessionRetry.sleep(delay, input.abort).catch(() => {})
+                continue
+              }
+
+              const retry = quota === "exhausted" ? undefined : SessionRetry.retryable(error)
               if (retry !== undefined) {
                 attempt++
                 const delay = SessionRetry.delay(attempt, error.name === "APIError" ? error : undefined)

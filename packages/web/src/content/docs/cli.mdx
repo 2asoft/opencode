@@ -121,6 +121,8 @@ opencode auth [command]
 
 OpenCode is powered by the provider list at [Models.dev](https://models.dev), so you can use `opencode auth login` to configure API keys for any provider you'd like to use. This is stored in `~/.local/share/opencode/auth.json`.
 
+For OpenAI OAuth, each successful login adds an account to the `openai_oauth_accounts` list keyed by account user identity (`chatgpt_account_user_id` when available). OpenCode automatically switches between these accounts in-memory when the current account runs out of quota.
+
 ```bash
 opencode auth login
 ```

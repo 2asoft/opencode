@@ -19,13 +19,10 @@ describe("openai usage view", () => {
     const result = createOpenAIUsageView(input)
 
     expect(result).not.toBeNull()
-    expect(result?.plan).toBe("team")
-    expect(result?.usedPercent).toBe(15)
-    expect(result?.windows).toHaveLength(1)
-    expect(result?.windows[0]?.name).toBe("3-hour limit")
-    expect(result?.windows[0]?.usedPercent).toBe(15)
-    expect(result?.windows[0]?.remainingPercent).toBe(85)
-    expect(result?.windows[0]?.resetIn).toBe("2h 30m")
+    expect(result?.limits).toHaveLength(1)
+    expect(result?.limits[0]?.label).toBe("3-hour limit")
+    expect(result?.limits[0]?.usedPercent).toBe(15)
+    expect(result?.limits[0]?.resetAfterSeconds).toBe(9000)
   })
 
   test("includes secondary window when present", () => {
@@ -49,10 +46,9 @@ describe("openai usage view", () => {
     const result = createOpenAIUsageView(input)
 
     expect(result).not.toBeNull()
-    expect(result?.limitReached).toBe(true)
-    expect(result?.windows).toHaveLength(2)
-    expect(result?.windows[0]?.name).toBe("1-day limit")
-    expect(result?.windows[1]?.name).toBe("3-hour limit")
+    expect(result?.limits).toHaveLength(2)
+    expect(result?.limits[0]?.label).toBe("1-day limit")
+    expect(result?.limits[1]?.label).toBe("3-hour limit")
   })
 
   test("detects openai provider", () => {

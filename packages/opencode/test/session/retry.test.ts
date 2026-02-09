@@ -1,10 +1,11 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import type { NamedError } from "@opencode-ai/util/error"
 import { APICallError } from "ai"
 import { setTimeout as sleep } from "node:timers/promises"
 import { SessionRetry } from "../../src/session/retry"
 import { MessageV2 } from "../../src/session/message-v2"
 import { ProviderID } from "../../src/provider/schema"
+import { Auth } from "../../src/auth"
 
 const providerID = ProviderID.make("test")
 
@@ -124,6 +125,173 @@ describe("session.retry.retryable", () => {
     }).toObject() as ReturnType<NamedError["toObject"]>
 
     expect(SessionRetry.retryable(error)).toBeUndefined()
+  })
+})
+
+describe("session.retry.openai.quota", () => {
+  let rotateSpy: any
+
+  beforeEach(() => {
+    rotateSpy = spyOn(Auth, "rotateOpenAIFromQuota")
+  })
+
+  afterEach(() => {
+    rotateSpy.mockRestore()
+  })
+
+  test("detects openai quota errors by response code", () => {
+    const error = new MessageV2.APIError({
+      message: "Rate limit hit",
+      statusCode: 429,
+      isRetryable: true,
+      responseBody: JSON.stringify({
+        error: { code: "insufficient_quota" },
+      }),
+    }).toObject()
+
+    expect(SessionRetry.isOpenAIQuotaError(error)).toBe(true)
+  })
+
+  test("does not classify generic openai rate limits as quota exhaustion", () => {
+    const error = new MessageV2.APIError({
+      message: "Rate limit exceeded",
+      statusCode: 429,
+      isRetryable: true,
+      responseBody: JSON.stringify({
+        error: { code: "rate_limit_exceeded" },
+      }),
+    }).toObject()
+
+    expect(SessionRetry.isOpenAIQuotaError(error)).toBe(false)
+  })
+
+  test("rotates account for openai quota errors", async () => {
+    rotateSpy.mockResolvedValueOnce("rotated")
+    const error = new MessageV2.APIError({
+      message: "You exceeded your current quota",
+      statusCode: 429,
+      isRetryable: true,
+    }).toObject()
+
+    const result = await SessionRetry.handleQuota({
+      providerID: "openai",
+      error,
+    })
+
+    expect(result).toBe("rotated")
+    expect(rotateSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test("returns exhausted when openai has no alternate account", async () => {
+    rotateSpy.mockResolvedValueOnce("exhausted")
+    const error = new MessageV2.APIError({
+      message: "insufficient_quota",
+      statusCode: 429,
+      isRetryable: true,
+    }).toObject()
+
+    const result = await SessionRetry.handleQuota({
+      providerID: "openai",
+      error,
+    })
+
+    expect(result).toBe("exhausted")
+    expect(rotateSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test("returns exhausted when openai oauth accounts are unavailable", async () => {
+    rotateSpy.mockResolvedValueOnce("unavailable")
+    const error = new MessageV2.APIError({
+      message: "insufficient_quota",
+      statusCode: 429,
+      isRetryable: true,
+    }).toObject()
+
+    const result = await SessionRetry.handleQuota({
+      providerID: "openai",
+      error,
+    })
+
+    expect(result).toBe("exhausted")
+    expect(rotateSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test("ignores quota handling for non-openai providers", async () => {
+    const error = new MessageV2.APIError({
+      message: "insufficient_quota",
+      statusCode: 429,
+      isRetryable: true,
+    }).toObject()
+
+    const result = await SessionRetry.handleQuota({
+      providerID: "anthropic",
+      error,
+    })
+
+    expect(result).toBe("ignored")
+    expect(rotateSpy).not.toHaveBeenCalled()
+  })
+
+  test("rotates account for openai 429 errors", async () => {
+    rotateSpy.mockResolvedValueOnce("rotated")
+    const error = new MessageV2.APIError({
+      message: "Rate limit exceeded",
+      statusCode: 429,
+      isRetryable: true,
+      responseBody: JSON.stringify({
+        error: { code: "rate_limit_exceeded" },
+      }),
+    }).toObject()
+
+    const result = await SessionRetry.handleQuota({
+      providerID: "openai",
+      error,
+    })
+
+    expect(result).toBe("rotated")
+    expect(rotateSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test("rotates account for openai 403 errors", async () => {
+    rotateSpy.mockResolvedValueOnce("rotated")
+    const error = new MessageV2.APIError({
+      message: "Forbidden",
+      statusCode: 403,
+      isRetryable: true,
+      responseBody: JSON.stringify({
+        error: { code: "rate_limit_exceeded" },
+      }),
+    }).toObject()
+
+    const result = await SessionRetry.handleQuota({
+      providerID: "openai",
+      error,
+    })
+
+    expect(result).toBe("rotated")
+    expect(rotateSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test("passes request-local tried accounts to auth rotation", async () => {
+    rotateSpy.mockResolvedValueOnce("rotated")
+    const error = new MessageV2.APIError({
+      message: "Rate limit exceeded",
+      statusCode: 429,
+      isRetryable: true,
+      responseBody: JSON.stringify({
+        error: { code: "rate_limit_exceeded" },
+      }),
+    }).toObject()
+    const tried = new Set<string>()
+
+    const result = await SessionRetry.handleQuota({
+      providerID: "openai",
+      error,
+      quotaTried: tried,
+    })
+
+    expect(result).toBe("rotated")
+    expect(rotateSpy).toHaveBeenCalledWith(tried)
   })
 })
 

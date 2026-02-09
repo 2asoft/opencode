@@ -101,10 +101,13 @@ test("Bedrock: loads when bearer token from auth.json is present", async () => {
     await Filesystem.write(
       authPath,
       JSON.stringify({
-        "amazon-bedrock": {
-          type: "api",
-          key: "test-bearer-token",
+        providers: {
+          "amazon-bedrock": {
+            type: "api",
+            key: "test-bearer-token",
+          },
         },
+        openai_oauth_accounts: {},
       }),
     )
 

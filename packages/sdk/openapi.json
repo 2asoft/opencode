@@ -4700,6 +4700,116 @@
         ]
       }
     },
+    "/provider/usage": {
+      "get": {
+        "operationId": "provider.usage",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sessionID",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Session ID"
+          }
+        ],
+        "summary": "Get provider usage",
+        "description": "Get usage limits for the current in-use provider if it supports reporting usage.",
+        "responses": {
+          "200": {
+            "description": "Provider usage status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "const": "missing"
+                        }
+                      },
+                      "required": ["status"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "const": "unsupported"
+                        }
+                      },
+                      "required": ["status"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "const": "error"
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["status", "error"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "const": "success"
+                        },
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "limits": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "usedPercent": {
+                                    "type": "number"
+                                  },
+                                  "resetAfterSeconds": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": ["usedPercent", "resetAfterSeconds"]
+                              }
+                            }
+                          },
+                          "required": ["limits"]
+                        }
+                      },
+                      "required": ["status", "data"]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.provider.usage({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/provider/{providerID}/oauth/authorize": {
       "post": {
         "operationId": "provider.oauth.authorize",
@@ -10787,6 +10897,9 @@
             "type": "number"
           },
           "accountId": {
+            "type": "string"
+          },
+          "accountKey": {
             "type": "string"
           },
           "enterpriseUrl": {

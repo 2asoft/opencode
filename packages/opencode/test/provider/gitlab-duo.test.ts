@@ -80,12 +80,15 @@ test("GitLab Duo: loads with OAuth token from auth.json", async () => {
   await Bun.write(
     authPath,
     JSON.stringify({
-      gitlab: {
-        type: "oauth",
-        access: "test-access-token",
-        refresh: "test-refresh-token",
-        expires: Date.now() + 3600000,
+      providers: {
+        gitlab: {
+          type: "oauth",
+          access: "test-access-token",
+          refresh: "test-refresh-token",
+          expires: Date.now() + 3600000,
+        },
       },
+      openai_oauth_accounts: {},
     }),
   )
 
@@ -117,10 +120,13 @@ test("GitLab Duo: loads with Personal Access Token from auth.json", async () => 
   await Bun.write(
     authPath2,
     JSON.stringify({
-      gitlab: {
-        type: "api",
-        key: "glpat-test-pat-token",
+      providers: {
+        gitlab: {
+          type: "api",
+          key: "glpat-test-pat-token",
+        },
       },
+      openai_oauth_accounts: {},
     }),
   )
 

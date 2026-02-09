@@ -1,6 +1,7 @@
 import type { NamedError } from "@opencode-ai/util/error"
 import { MessageV2 } from "./message-v2"
 import { iife } from "@/util/iife"
+import { Auth } from "@/auth"
 
 export namespace SessionRetry {
   export const RETRY_INITIAL_DELAY = 2000
@@ -97,5 +98,42 @@ export namespace SessionRetry {
     } catch {
       return undefined
     }
+  }
+
+  export function isOpenAIQuotaError(error: ReturnType<NamedError["toObject"]>) {
+    if (!MessageV2.APIError.isInstance(error)) return false
+    const code = iife(() => {
+      if (!error.data.responseBody) return ""
+      try {
+        const body = JSON.parse(error.data.responseBody)
+        if (typeof body?.code === "string") return body.code.toLowerCase()
+        if (typeof body?.error?.code === "string") return body.error.code.toLowerCase()
+      } catch {}
+      return ""
+    })
+    if (code === "insufficient_quota") return true
+
+    const text = [error.data.message, error.data.responseBody]
+      .filter((x) => typeof x === "string")
+      .join(" ")
+      .toLowerCase()
+    return ["insufficient_quota", "exceeded your current quota", "out of quota", "quota exceeded"].some((x) =>
+      text.includes(x),
+    )
+  }
+
+  export async function handleQuota(input: {
+    providerID: string
+    error: ReturnType<NamedError["toObject"]>
+    quotaTried?: Set<string>
+  }) {
+    if (input.providerID !== "openai") return "ignored" as const
+    const statusCode = MessageV2.APIError.isInstance(input.error) ? input.error.data.statusCode : undefined
+    const shouldRotate = isOpenAIQuotaError(input.error) || statusCode === 429 || statusCode === 403
+    if (!shouldRotate) return "ignored" as const
+
+    const next = await Auth.rotateOpenAIFromQuota(input.quotaTried)
+    if (next === "rotated") return "rotated" as const
+    return "exhausted" as const
   }
 }

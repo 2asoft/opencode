@@ -11,11 +11,13 @@ import { useKeybind } from "../../context/keybind"
 import { useDirectory } from "../../context/directory"
 import { useKV } from "../../context/kv"
 import { useLocal } from "../../context/local"
+import { useSDK } from "../../context/sdk"
 import { TodoItem } from "../../component/todo-item"
-import { loadOpenAIUsage, type OpenAIUsageView, isOpenAIProvider } from "../../util/openai-usage"
+import { type OpenAIUsageView, isOpenAIProvider } from "../../util/openai-usage"
 
 export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const sync = useSync()
+  const sdk = useSDK()
   const { theme } = useTheme()
   const session = createMemo(() => sync.session.get(props.sessionID)!)
   const diff = createMemo(() => sync.data.session_diff[props.sessionID] ?? [])
@@ -42,23 +44,47 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
     if (usage.status === "loading") return "Loading"
     if (usage.status === "missing") return "Not connected"
     if (usage.status === "error") return "Unavailable"
-    if (usage.status === "success") return `${usage.data?.usedPercent ?? 0}% used`
+    if (usage.status === "success") return `${usage.data?.limits[0]?.usedPercent ?? 0}% used`
     return "—"
   })
 
+  const formatReset = (seconds: number) => {
+    const days = Math.floor(seconds / 86400)
+    const hours = Math.floor((seconds % 86400) / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    const parts: string[] = []
+    if (days > 0) parts.push(`${days}d`)
+    if (hours > 0) parts.push(`${hours}h`)
+    if (minutes > 0 || parts.length === 0) parts.push(`${minutes}m`)
+    return parts.join(" ")
+  }
+
   const refreshUsage = () => {
     setUsage("status", "loading")
-    loadOpenAIUsage().then((result) => {
-      if (result.status === "success") {
-        setUsage({ status: "success", data: result.data })
-        return
-      }
-      if (result.status === "missing") {
-        setUsage({ status: "missing" })
-        return
-      }
-      setUsage({ status: "error", error: result.error })
-    })
+    sdk.client.provider
+      .usage({ sessionID: props.sessionID }, { throwOnError: true })
+      .then((result) => {
+        if (!result.data) {
+          setUsage({ status: "error", error: "Usage unavailable" })
+          return
+        }
+        if (result.data.status === "success") {
+          setUsage({ status: "success", data: result.data.data })
+          return
+        }
+        if (result.data.status === "missing") {
+          setUsage({ status: "missing" })
+          return
+        }
+        if (result.data.status === "unsupported") {
+          setUsage({ status: "error", error: "Usage not supported by this provider" })
+          return
+        }
+        setUsage({ status: "error", error: result.data.error })
+      })
+      .catch((err) => {
+        setUsage({ status: "error", error: err instanceof Error ? err.message : String(err) })
+      })
   }
 
   const local = useLocal()
@@ -157,7 +183,15 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
             </box>
             <Show when={showUsage()}>
               <box>
-                <box flexDirection="row" gap={1} onMouseDown={() => setExpanded("usage", !expanded.usage)}>
+                <box
+                  flexDirection="row"
+                  gap={1}
+                  onMouseDown={() => {
+                    const next = !expanded.usage
+                    setExpanded("usage", next)
+                    if (next) refreshUsage()
+                  }}
+                >
                   <text fg={theme.text}>{expanded.usage ? "▼" : "▶"}</text>
                   <text fg={theme.text}>
                     <b>Usage</b>
@@ -179,17 +213,14 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                     </Match>
                     <Match when={usage.status === "success"}>
                       <box>
-                        <text fg={theme.textMuted}>Plan {usage.data?.plan ?? "unknown"}</text>
-                        <For each={usage.data?.windows ?? []}>
-                          {(window) => (
+                        <For each={usage.data?.limits ?? []}>
+                          {(limit) => (
                             <text fg={theme.textMuted}>
-                              {window.name} · {window.usedPercent}% used · Resets in {window.resetIn}
+                              {limit.label ? `${limit.label} · ` : ""}
+                              {limit.usedPercent}% used · Resets in {formatReset(limit.resetAfterSeconds)}
                             </text>
                           )}
                         </For>
-                        <Show when={usage.data?.limitReached}>
-                          <text fg={theme.warning}>Rate limit reached</text>
-                        </Show>
                       </box>
                     </Match>
                   </Switch>
