@@ -1,3 +1,5 @@
+OPENCODE_CHANNEL := env('OPENCODE_CHANNEL', shell('git branch --show-current'))
+
 deps:
   bun install
 
@@ -11,11 +13,11 @@ tui-install: tui-build
 
 # Build desktop sidecar (includes TUI build)
 gui-sidecar: deps
-  TAURI_ENV_TARGET_TRIPLE=${TAURI_ENV_TARGET_TRIPLE:-x86_64-unknown-linux-gnu} bun run --cwd packages/desktop predev
+  OPENCODE_CHANNEL="{{OPENCODE_CHANNEL}}" TAURI_ENV_TARGET_TRIPLE=${TAURI_ENV_TARGET_TRIPLE:-x86_64-unknown-linux-gnu} bun run --cwd packages/desktop predev
 
 # Build desktop app binary (no bundle)
 gui-build: tui-build
-  bun run --cwd packages/desktop tauri build --no-bundle
+  OPENCODE_CHANNEL="{{OPENCODE_CHANNEL}}" bun run --cwd packages/desktop tauri build --no-bundle
 
 
 # Install desktop binary to ~/.local/bin/
