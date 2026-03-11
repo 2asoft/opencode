@@ -1,4 +1,4 @@
-OPENCODE_CHANNEL := env('OPENCODE_CHANNEL', shell('git branch --show-current'))
+OPENCODE_CHANNEL := env('OPENCODE_CHANNEL', 'aa')
 
 deps:
   bun install
